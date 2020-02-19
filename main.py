@@ -103,12 +103,12 @@ def main():
                 last_save = save_tweets(df)
                 indicator(row_diff(orow, df.shape[0]))
 
-# rate limit error
+# rate limit error, sleeps for 15 minutes
         except twython.TwythonRateLimitError as error1:
                 remainder = abs(float(api.get_lastfunction_header(header='x-rate-limit-reset')) - tm.time())
                 sleeping(error1, remainder, last_save)
                 continue
-# any other error
+# any other error, sleeps for 5 minutes
         except twython.TwythonError as error2:
                 remainder = 300
                 sleeping(error2, remainder, last_save)
