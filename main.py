@@ -1,15 +1,18 @@
 import twython
 import itertools
-import time
+import time as tm
 import pandas as pd
 import os
 import datetime
 import config
+import sys
 
+# Setting up global variables for directory paths
 dir_path = os.path.dirname(os.path.realpath(__file__))
 save_path = dir_path + '\\output\\'
 file_name = 'tweets.csv'
 
+# Queries used for query_search function, key = "query_type" value = "search"
 queries = {'Sanders': "'sanders' OR 'bernie sanders' or 'bernie'",
          'Biden': "'biden' OR 'joe biden'",
          'Bloomberg': "'bloomberg' OR 'mike bloomberg'",
@@ -17,11 +20,13 @@ queries = {'Sanders': "'sanders' OR 'bernie sanders' or 'bernie'",
          'Buttigieg': "'buttigeg' OR 'pete buttigeg' OR 'mayor pete'",
          'Klobuchar': "'klobuchar' OR 'amy klobuchar'"}
 
+# Searches using api and returns JSON (dictionary)
 def query_search(query, twitter, lg='en', mode='extended', rt=False, pl='United States') -> dict:
     search = twitter.search(q=query, lang=lg, place=pl, tweet_mode=mode, retweeted=rt)
     result = search['statuses'][0]
     return(result)
 
+# Looks up keys that we want and stores them. Accounts for different search modes (extended), appends them to pandas dataframe
 def result_filter_add(json: dict, query: str, dataframe):
     try:
         dict = {'query_type': query,
@@ -49,11 +54,15 @@ def result_filter_add(json: dict, query: str, dataframe):
     new_df = dataframe.append(dict, ignore_index=True)
     return(new_df)
 
+# this saves the file, and returns when it was saved
 def save_tweets(df, filename=file_name, path=save_path):
-        # this will need to be fixed as some tweets will have other query types (reduces amount of unique searches)
+        # pandas function that drops duplicates
         df = df.drop_duplicates('tweet')
         df.to_csv(save_path+filename, index=False)
+        last_saved = datetime.datetime.fromtimestamp(tm.time())
+        return(last_saved)
 
+# Checks if there is an existing csv file to convert into a df (creates one if there isn't)
 def check_existence(file=file_name):
     try:
         df = pd.read_csv(save_path + file)
@@ -62,38 +71,47 @@ def check_existence(file=file_name):
         df = pd.DataFrame()
         return(df)
 
-def indicator(instance, last_saved):
-        print("Tweets aggregated: {0}, Last saved: {1}".format(instance, last_saved), end="\r")
+# Command prompt message that shows how many tweets have been collected on session
+def indicator(instance):
+        print("Tweets aggregated: {0}".format(instance) + "{:<50}".format(" "), end="\r")
 
-def sleeping(time):
-    minutes = time / 60 % 60
-    print("Rate Limit Reached! Sleeping for %.2f minutes...\t\t\t"%minutes, end="\r")
+# Displays response code and displays countdown timer
+def sleeping(response_code, time, last_saved):
+    print("{0}, Sleeping for {1} seconds, Last save: {2}".format(response_code, int(time), last_saved), end="\r")
+    tm.sleep(time)
+
+# helper function that returns difference in opening row count and current row count
+def row_diff(orow, crow):
+    return(crow-orow)
 
 def main():
+    # this part sets up the initial variables used in the for loop, df = dataframe, orow = opening row count
     api = twython.Twython(config.app_key, config.app_secret,
                          config.oauth_token, config.oauth_token_secret)
-
     df = check_existence()
+    orow = df.shape[0]
+    last_save = ""
 
-    last_saved = None
-    instance = 0
+    # creates 5 brand new lines
+    print("\n" * 5)
 
+# reiterates through query dictionary (forever)
     for query in itertools.cycle(queries):
         try:
                 result = query_search(query, twitter=api)
                 df = result_filter_add(result, query, df)
-                instance += 1
-                indicator(instance, last_saved)
+                last_save = save_tweets(df)
+                indicator(row_diff(orow, df.shape[0]))
 
-                if instance % 179 == 0:
-                    save_tweets(df)
-                    last_saved = datetime.datetime.fromtimestamp(time.time())
-                else:
-                    continue
-
+# rate limit error
         except twython.TwythonRateLimitError as error1:
-                remainder = float(api.get_lastfunction_header(header='x-rate-limit-reset')) - time.time()
-                sleeping(remainder)
+                remainder = abs(float(api.get_lastfunction_header(header='x-rate-limit-reset')) - tm.time())
+                sleeping(error1, remainder, last_save)
+                continue
+# any other error
+        except twython.TwythonError as error2:
+                remainder = 300
+                sleeping(error2, remainder, last_save)
                 continue
 
 if __name__ == "__main__":
